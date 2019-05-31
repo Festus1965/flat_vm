@@ -57,6 +57,14 @@ local ores = {
 	'default:stone_with_diamond',
 	'default:stone_with_mese',
 }
+do
+	ore_odds = {}
+	total_ore_odds = 0
+	for i = 1, #ores do
+		ore_odds[#ores - i + 1] = i
+		total_ore_odds = total_ore_odds + i
+	end
+end
 
 
 -- This tables looks up nodes that aren't already stored.
