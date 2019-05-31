@@ -1,0 +1,8 @@
+# Create ruined houses.
+flat_vm_enable_houses (Enable houses) bool true
+
+# Create ruinous roads.
+flat_vm_enable_roads (Enable roads) bool true
+
+# Relight worlds created by the flat_layer_cavern patch.
+flat_vm_enable_layer_lighting (Enable layer lighting) bool true

@@ -13,13 +13,24 @@ mod.world = minetest.get_worldpath()
 
 
 local DEBUG
-local enable_roads = true
-local enable_houses = true
-local enable_layer_relighting = true
+local enable_roads = minetest.settings:get_bool('flat_vm_enable_houses')
+local enable_houses = minetest.settings:get_bool('flat_vm_enable_houses')
+local enable_layer_relighting = minetest.settings:get_bool('flat_vm_enable_layer_lighting')
+
+if enable_roads == nil then
+	enable_roads = true
+end
+
+if enable_houses == nil then
+	enable_houses = true
+end
+
+if enable_layer_relighting == nil then
+	enable_layer_relighting = false
+end
 
 local layer_depth = 6000
 local chunk_offset = 32
---local bumped_lower_limit = math.floor((-31000 + layer_depth / 2) / layer_depth) * layer_depth
 
 local Geomorph = geomorph.Geomorph
 local math_max = math.max
@@ -510,20 +521,55 @@ function houses(y_level)
 end
 
 
+local road_w = 5
+local potholes = 10
+local moss = 3
+local n_road = node['default:cobble']
+local n_road_wet = node['default:mossycobble']
+local road_noise
+local default_terrain = {offset = 0, scale = 1, seed = 7244, spread = {x = 600, y = 600, z = 600}, octaves = 5, persist = 0.6, lacunarity = 2.0}
+local road_noise_def = minetest.get_noiseparams('mgflat_np_terrain') or default_terrain
+road_noise_def.offset = road_noise_def.offset + road_w
+road_noise_def.scale = 50
+road_noise_def.octaves = road_noise_def.octaves - 2
+
+local road_replace_dry = {
+	[node['default:stone']] = true,
+	[node['default:sandstone']] = true,
+	[node['default:desert_sandstone']] = true,
+	[node['default:dirt']] = true,
+	[node['default:snowblock']] = true,
+	[node['default:sand']] = true,
+	[node['default:silver_sand']] = true,
+	[node['default:desert_sand']] = true,
+	[node['default:dirt_with_dry_grass']] = true,
+}
+local road_replace_wet = {
+	[node['default:dirt_with_grass']] = true,
+	[node['default:dirt_with_coniferous_litter']] = true,
+	[node['default:dirt_with_rainforest_litter']] = true,
+	[node['default:dirt_with_snow']] = true,
+}
+
 function map_roads()
 	local csize, area = mod.csize, mod.area
+	local gpr = mod.gpr
+	local data = mod.data
+	local minp = mod.minp
+	local maxp = mod.maxp
 	local roads = {}
 	local has_roads = false
 
 	local index = 1
-	if enable_roads then
-		--[[
+	if enable_roads and road_noise_def then
+		road_noise = minetest.get_perlin_map(road_noise_def, {x=mod.csize.x + road_w * 2, y=mod.csize.z + road_w * 2}):get_2d_map_flat({x=mod.minp.x, y=mod.minp.z}, road_noise)
+
 		local road_ws = road_w * road_w
 		for x = -road_w, csize.x + road_w - 1 do
 			index = x + road_w + 1
-			local l_road = mod.noise['road_1'].map[index]
+			local l_road = road_noise[index]
 			for z = -road_w, csize.z + road_w - 1 do
-				local road_1 = mod.noise['road_1'].map[index]
+				local road_1 = road_noise[index]
 				if (l_road < 0) ~= (road_1 < 0) then
 					local index2 = z * csize.x + x + 1
 					for zo = -road_w, road_w do
@@ -547,9 +593,9 @@ function map_roads()
 		-- Mark the road locations.
 		index = 1
 		for z = -road_w, csize.z + road_w - 1 do
-			local l_road = mod.noise['road_1'].map[index]
+			local l_road = road_noise[index]
 			for x = -road_w, csize.x + road_w - 1 do
-				local road_1 = mod.noise['road_1'].map[index]
+				local road_1 = road_noise[index]
 				if (l_road < 0) ~= (road_1 < 0) then
 					local index2 = z * csize.x + x + 1
 					for zo = -road_w, road_w do
@@ -568,21 +614,20 @@ function map_roads()
 				index = index + 1
 			end
 		end
-		--]]
 	end
 
 	local boxes = {}
 
 	-- Generate boxes for constructions.
 	for ct = 1, 15 do
-		local scale = mod.gpr:next(1, 2) * 4
-		local sz = VN(mod.gpr:next(1, 2), 1, mod.gpr:next(1, 2))
+		local scale = gpr:next(1, 2) * 4
+		local sz = VN(gpr:next(1, 2), 1, gpr:next(1, 2))
 		sz.x = sz.x * scale + 9
 		sz.y = sz.y * 8
 		sz.z = sz.z * scale + 9
 
 		for ct2 = 1, 10 do
-			local pos = VN(mod.gpr:next(2, csize.x - sz.x - 3), base_level, mod.gpr:next(2, csize.z - sz.z - 3))
+			local pos = VN(gpr:next(2, csize.x - sz.x - 3), base_level, gpr:next(2, csize.z - sz.z - 3))
 			local good = true
 			for _, box in pairs(boxes) do
 				if box.pos.x + box.sz.x < pos.x
@@ -614,6 +659,28 @@ function map_roads()
 					sz = vector.add(sz, -4)
 				})
 				break
+			end
+		end
+	end
+
+	if has_roads then
+		index = 1
+		for z = minp.z, maxp.z do
+			local ivm = area:index(minp.x, minp.y + base_level + chunk_offset, z)
+			for x = minp.x, maxp.x do
+				if roads[index] then
+					local ps = gpr:next(1, potholes)
+					if ps > 1 then
+						ps = gpr:next(1, moss)
+						if road_replace_dry[data[ivm]] or (road_replace_wet[data[ivm]] and ps > 1) then
+							data[ivm] = n_road
+						elseif road_replace_wet[data[ivm]] then
+							data[ivm] = n_road_wet
+						end
+					end
+				end
+				index = index + 1
+				ivm = ivm + 1
 			end
 		end
 	end
